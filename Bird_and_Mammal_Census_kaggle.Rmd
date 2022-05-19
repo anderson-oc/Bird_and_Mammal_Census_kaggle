@@ -1,0 +1,145 @@
+---
+title: "Bird and Mammal Census Kaggle"
+author: "AOC"
+date: "4/25/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Mammal and Bird Census Data Visualization
+
+This project uses a public mammal and bird census dataset that can be found at <https://www.kaggle.com/datasets/jishnukoliyadan/bird-and-mammal-census-calcofi-nmfs-cpr> and originally at <https://portal.edirepository.org/nis/mapbrowse?packageid=knb-lter-cce.255.3>. I want to thank the organizations and personnel responsible for providing the data publicly.
+
+Farallon Institute Advanced Ecosystem Research, CalCOFI - Scripps Institution of Oceanography, California Current Ecosystem LTER, and B. Sydeman. 2021. Bird and mammal observations aboard CalCOFI (1987-2021, ongoing), NMFS (1996-2021, ongoing) and CPR (2003-2006, completed) cruises. ver 3. Environmental Data Initiative. https://doi.org/10.6073/pasta/4ee1bd702acb11786277192a41626800 (Accessed 2022-05-19)
+
+My immediate interest is just to explore the data and practice visualization, first for depth comparison of aquatic mammals and then a little mapping with leaflet. I might make a model along the way. 
+
+
+
+```{r libraries, warning = FALSE}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(devtools)
+library(ggpubr)
+
+```
+
+## Reading in the data
+
+
+
+```{r data read, warning = FALSE}
+cpr_obs <- fread('CPR_cruise_observations.csv')
+spec_codes <- read_excel('species_codes.xlsx')
+cpr_transect <- fread('CPR_cruise_transect_log.csv')
+nmfs_obs <- fread('NMFS_cruise_observations.csv')
+nmfs_transect <- fread('NMFS_cruise_transect_log.csv')
+
+nmfs_obs$Species <- str_trim(nmfs_obs$Species, 'right')
+
+
+head(cpr_obs)
+head(spec_codes)
+
+
+
+spec_codes$Species <- str_trim(spec_codes$Species, 'right')
+
+
+head(cpr_transect)
+
+data <- left_join(nmfs_obs, nmfs_transect, by='GIS key')
+data$Species <- str_trim(data$Species, 'right')
+
+newdata <- left_join(data, spec_codes, by = "Species")
+```
+
+Now that we're all joined up, I want to pull out my whale species and plot them by depth to see if we see anything interesting. 
+
+```{r warning = FALSE}
+
+unique(newdata$Definition)
+
+list <- newdata %>% 
+  group_by(Definition) %>%
+  summarize(n=n(), depth = mean(`Depth (m)`))
+list
+whales <- newdata %>%
+  filter(grepl('whale', Definition))
+
+glimpse(whales)
+
+whales_depth <- whales %>%
+  filter(is.na(`Depth (m)`) == FALSE)
+
+glimpse(whales_depth)
+
+whale_depth_box <- ggplot(data = whales_depth, aes(x=Definition,y = `Depth (m)`)) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),legend.position = "None")
+
+whale_depth_box
+
+whale_depth_jit <- ggplot(data = whales_depth, aes(x=Definition, y = `Depth (m)`, color=Definition)) +
+  geom_jitter() +
+  theme_minimal() +
+  ylim(-3500, 100) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),legend.position = "None") +
+  stat_compare_means(method ="anova") 
+
+whale_depth_jit
+
+whales$x <- ''
+
+whale_depth_jit2 <- ggplot(data = whales, aes(x=x, y=`Depth (m)`, color=Definition)) +
+  geom_jitter() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  theme_minimal()
+
+whale_depth_jit2
+  
+
+```
+Some obvious depth sighting differences show up. You never see sperm whales near the top, although you don't see many at all, and many whales don't get noticed nearly as far down as some others.
+
+## Mapping with Leaflet
+
+I'm not an expert with mapping data visualization, but I did a little tutorial which pulled earthquake data and put it in leaflet a while back and loved what I could produce quickly and easily. Find the tutorial here <https://towardsdatascience.com/how-to-make-stunning-geomaps-in-r-a-complete-guide-with-leaflet-be1b857f1644>. Here I take the same whale data and use the middle latitude and longitudes of the arc of data that was recorded and mapped it over the coast of California where the census cruises took place.
+
+
+```{r warning = FALSE}
+library(leaflet)
+library(rgdal)
+
+whales <- whales %>%
+  rename(longitude=`Longitude Mid (Âº)`) %>%
+  rename(latitude=`Latitude Mid (Âº)`)
+
+factpal <- colorFactor(topo.colors(5), whales$Definition)
+
+leaflet() %>%
+  setView(lng = -121, lat = 36, zoom = 5) %>%
+  addProviderTiles("Esri.WorldStreetMap") %>%
+  addCircles(
+    data = whales,
+    radius = 5,
+    color = ~factpal(Definition),
+    fillColor = "#F60D1D",
+    fillOpacity = 0.25,
+    popup = paste0(
+      "<strong>Time: </strong>", whales$Date, "<br>",
+      "<strong>Time: </strong>", whales$Definition, "<br>",
+      "<strong>Time: </strong>", whales$Season, "<br>"
+    )
+  )
+```
+
